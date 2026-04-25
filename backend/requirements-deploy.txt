@@ -32,4 +32,3 @@ certifi
 charset-normalizer
 idna
 urllib3
-python-multipart
