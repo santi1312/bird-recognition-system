@@ -16,11 +16,14 @@ def download_model():
     print("Downloading model from HuggingFace...")
     sys.stdout.flush()
 
+    token = os.environ.get("HF_TOKEN", None)
+
     hf_hub_download(
         repo_id=REPO_ID,
         filename="bird_model.pt",
         local_dir=SAVE_DIR,
-        repo_type="model"
+        repo_type="model",
+        token=token
     )
     print("Model downloaded!")
 
@@ -28,7 +31,8 @@ def download_model():
         repo_id=REPO_ID,
         filename="class_names.json",
         local_dir=SAVE_DIR,
-        repo_type="model"
+        repo_type="model",
+        token=token
     )
     print("Class names downloaded!")
     sys.stdout.flush()
