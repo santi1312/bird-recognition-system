@@ -1,0 +1,22 @@
+# Python
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.pyc
+backend/.env
+backend/ml/image/dataset/
+backend/ml/image/bird_model.pt
+backend/ml/image/*.pt
+backend/ml/image/*.pth
+
+# Node
+frontend/node_modules/
+mobile/node_modules/
+
+# HuggingFace cache
+.cache/
+
+# Misc
+.DS_Store
+*.log
+*.zip
