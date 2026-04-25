@@ -6,17 +6,20 @@ REPO_ID  = "Sidd1312/bird-recognition-model"
 SAVE_DIR = os.path.join("ml", "image")
 
 def download_model():
+    os.makedirs(SAVE_DIR, exist_ok=True)
+
     model_path = os.path.join(SAVE_DIR, "bird_model.pt")
     names_path = os.path.join(SAVE_DIR, "class_names.json")
 
     if os.path.exists(model_path) and os.path.exists(names_path):
         print("Model already exists locally!")
+        sys.stdout.flush()
         return
+
+    token = os.environ.get("HF_TOKEN", None)
 
     print("Downloading model from HuggingFace...")
     sys.stdout.flush()
-
-    token = os.environ.get("HF_TOKEN", None)
 
     hf_hub_download(
         repo_id=REPO_ID,
@@ -26,6 +29,7 @@ def download_model():
         token=token
     )
     print("Model downloaded!")
+    sys.stdout.flush()
 
     hf_hub_download(
         repo_id=REPO_ID,

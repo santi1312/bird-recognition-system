@@ -1,3 +1,16 @@
+import sys
+import os
+
+# Download model FIRST before anything else
+print("Checking model...")
+sys.stdout.flush()
+
+from download_model import download_model
+download_model()
+
+print("Model check complete!")
+sys.stdout.flush()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
