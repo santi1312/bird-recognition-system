@@ -2,23 +2,30 @@ import sys
 import os
 import tempfile
 import subprocess
+import torch
+import torch.nn.functional as F
+import json
+import numpy as np
 from fastapi import APIRouter, UploadFile, File, HTTPException
 
 router = APIRouter()
 
-_analyzer = None
+_audio_model       = None
+_audio_class_names = None
 
-def get_analyzer():
-    global _analyzer
-    if _analyzer is None:
-        from birdnetlib import Recording
-        from birdnetlib.analyzer import Analyzer
-        print("Loading BirdNET analyzer...")
+def get_audio_model():
+    global _audio_model, _audio_class_names
+    if _audio_model is None:
+        from ml.audio.model import load_audio_model
+        CLASS_NAMES_PATH = os.path.join("ml", "image", "class_names.json")
+        with open(CLASS_NAMES_PATH, "r") as f:
+            _audio_class_names = json.load(f)
+        print("Loading audio model...")
         sys.stdout.flush()
-        _analyzer = Analyzer()
-        print("BirdNET ready!")
+        _audio_model = load_audio_model(num_classes=len(_audio_class_names))
+        print("Audio model ready!")
         sys.stdout.flush()
-    return _analyzer
+    return _audio_model, _audio_class_names
 
 ALLOWED_AUDIO_TYPES = [
     "audio/mpeg", "audio/wav", "audio/x-wav",
@@ -29,7 +36,8 @@ ALLOWED_AUDIO_TYPES = [
 def convert_to_wav(input_path: str) -> str:
     output_path = input_path + "_converted.wav"
     result = subprocess.run(
-        ["ffmpeg", "-y", "-i", input_path, "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", output_path],
+        ["ffmpeg", "-y", "-i", input_path,
+         "-ar", "22050", "-ac", "1", "-c:a", "pcm_s16le", output_path],
         capture_output=True, text=True
     )
     if result.returncode != 0:
@@ -39,12 +47,13 @@ def convert_to_wav(input_path: str) -> str:
 @router.post("/")
 async def identify_bird_audio(file: UploadFile = File(...)):
     if file.content_type not in ALLOWED_AUDIO_TYPES:
-        raise HTTPException(status_code=400, detail="Unsupported audio format: " + str(file.content_type))
+        raise HTTPException(status_code=400, detail="Unsupported audio format")
 
     audio_bytes = await file.read()
+
     suffix = ".mp3"
-    if file.filename.endswith(".wav"):   suffix = ".wav"
-    elif file.filename.endswith(".ogg"): suffix = ".ogg"
+    if file.filename.endswith(".wav"):    suffix = ".wav"
+    elif file.filename.endswith(".ogg"):  suffix = ".ogg"
     elif file.filename.endswith(".flac"): suffix = ".flac"
 
     tmp_path = None
@@ -57,29 +66,30 @@ async def identify_bird_audio(file: UploadFile = File(...)):
 
         wav_path = convert_to_wav(tmp_path)
 
-        from birdnetlib import Recording
-        analyzer = get_analyzer()
+        import librosa
+        y, sr = librosa.load(wav_path, sr=22050, duration=5.0, mono=True)
+        mel_spec = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128, fmax=8000)
+        log_mel  = librosa.power_to_db(mel_spec, ref=np.max)
+        log_mel  = (log_mel - log_mel.min()) / (log_mel.max() - log_mel.min() + 1e-6)
 
-        recording = Recording(analyzer, wav_path, lat=0, lon=0, min_conf=0.1)
-        recording.analyze()
-        detections = recording.detections
+        tensor = torch.tensor(log_mel, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        tensor = F.interpolate(tensor, size=(128, 128), mode="bilinear", align_corners=False)
 
-        if not detections:
-            return {"filename": file.filename, "predictions": [], "message": "No bird sounds detected"}
+        model, class_names = get_audio_model()
+
+        with torch.no_grad():
+            outputs = model(tensor)
+            probs   = torch.softmax(outputs, dim=1)
+            top5    = torch.topk(probs, min(5, len(class_names)))
 
         predictions = []
-        seen = set()
-        for det in sorted(detections, key=lambda x: x["confidence"], reverse=True):
-            species = det["common_name"]
-            if species not in seen:
-                seen.add(species)
-                predictions.append({
-                    "species":         species,
-                    "scientific_name": det.get("scientific_name", ""),
-                    "confidence":      round(det["confidence"] * 100, 2)
-                })
-            if len(predictions) >= 5:
-                break
+        for i, p in zip(top5.indices[0], top5.values[0]):
+            raw_name = class_names[i.item()]
+            name = raw_name.split("_", 1)[1].strip().title() if "_" in raw_name else raw_name.title()
+            predictions.append({
+                "species":    name,
+                "confidence": round(float(p) * 100, 2)
+            })
 
         return {"filename": file.filename, "predictions": predictions}
 
